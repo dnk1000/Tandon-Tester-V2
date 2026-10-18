@@ -1,3 +1,7 @@
+/**
+ * @file test_hal.c
+ * @brief Host-only test hal fixture or declaration; not a physical hardware validation.
+ */
 #include <assert.h>
 #include <stdio.h>
 #include "floppy_hal.h"
@@ -6,6 +10,9 @@ static int levels[49];
 static uint64_t preloaded, outputs;
 static int64_t clock_us,last_dir,step_start;
 static unsigned step_count;
+/**
+ * @brief Record GPIO writes and assert that write-related outputs never go HIGH.
+ */
 esp_err_t gpio_set_level(int pin,int value)
 {
     assert(pin>=0 && pin<49 && pin!=19 && pin!=20); // USB never touched
@@ -17,6 +24,9 @@ esp_err_t gpio_set_level(int pin,int value)
     if (pin==PIN_STEP && !value && levels[pin]) assert(clock_us-step_start>=5);
     levels[pin]=value;preloaded|=1ULL<<pin;return ESP_OK;
 }
+/**
+ * @brief Verify output latch preloading before recording output enable.
+ */
 esp_err_t gpio_config(const gpio_config_t *c)
 {
     if (c->mode==GPIO_MODE_OUTPUT) {
@@ -26,10 +36,25 @@ esp_err_t gpio_config(const gpio_config_t *c)
     }
     return ESP_OK;
 }
+/**
+ * @brief Read the fixture GPIO level without hardware access.
+ */
 int gpio_get_level(int pin) { return levels[pin]; }
+/**
+ * @brief Advance virtual time instead of busy-waiting on the host.
+ */
 void esp_rom_delay_us(unsigned us) { clock_us+=us; }
+/**
+ * @brief Advance deterministic fixture time without running a scheduler.
+ */
 void vTaskDelay(unsigned ticks) { clock_us+=ticks*1000; }
+/**
+ * @brief Return virtual microseconds for HAL timing tests.
+ */
 int64_t esp_timer_get_time(void) { return clock_us; }
+/**
+ * @brief Run the hal host fixture assertions.
+ */
 int main(void)
 {
     assert(floppy_hal_init()==ESP_OK);

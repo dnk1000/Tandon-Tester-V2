@@ -1,3 +1,6 @@
+# @file CMakeLists.txt
+# @brief Native host targets compiling production code against test doubles.
+#
 cmake_minimum_required(VERSION 3.16)
 project(tm100_host_tests C)
 set(CMAKE_C_STANDARD 11)

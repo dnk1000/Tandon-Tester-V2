@@ -1,3 +1,7 @@
+/**
+ * @file test_nvs.c
+ * @brief Host-only test nvs fixture or declaration; not a physical hardware validation.
+ */
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -8,12 +12,21 @@ static size_t size;
 static bool found;
 static esp_err_t init_error, write_error, commit_error;
 static unsigned commits;
+/**
+ * @brief Return an injected initialization result without touching flash.
+ */
 esp_err_t nvs_flash_init(void) { return init_error; }
+/**
+ * @brief Validate the namespace and model opening the fixture record.
+ */
 esp_err_t nvs_open(const char *ns,int mode,nvs_handle_t *h)
 {
     assert(strcmp(ns,"tm100")==0); *h=1;
     return mode==NVS_READONLY && !found?ESP_ERR_NVS_NOT_FOUND:ESP_OK;
 }
+/**
+ * @brief Copy the fixture record with absence and buffer-size checks.
+ */
 esp_err_t nvs_get_blob(nvs_handle_t h,const char *key,void *out,size_t *n)
 {
     assert(h==1 && strcmp(key,"settings")==0);
@@ -21,14 +34,26 @@ esp_err_t nvs_get_blob(nvs_handle_t h,const char *key,void *out,size_t *n)
     if (*n<size) return ESP_ERR_INVALID_ARG;
     memcpy(out,blob,size);*n=size;return ESP_OK;
 }
+/**
+ * @brief Store a fixture record or return an injected write error.
+ */
 esp_err_t nvs_set_blob(nvs_handle_t h,const char *key,const void *in,size_t n)
 {
     assert(h==1 && strcmp(key,"settings")==0 && n<=sizeof(blob));
     if (write_error) return write_error;
     memcpy(blob,in,n);size=n;found=true;return ESP_OK;
 }
+/**
+ * @brief Count commit attempts and return an injected result.
+ */
 esp_err_t nvs_commit(nvs_handle_t h) { assert(h==1);++commits;return commit_error; }
+/**
+ * @brief Verify that the expected fixture handle is closed.
+ */
 void nvs_close(nvs_handle_t h) { assert(h==1); }
+/**
+ * @brief Run the nvs host fixture assertions.
+ */
 int main(void)
 {
     assert(config_init()==ESP_OK && config_get()->step_time==6);

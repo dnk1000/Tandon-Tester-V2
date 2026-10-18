@@ -1,0 +1,23 @@
+# @file Doxyfile
+# @brief Generate firmware and host-test HTML API documentation.
+PROJECT_NAME           = "TM100 Tester Revision A"
+PROJECT_BRIEF          = "Non-writing ESP32-S3 floppy-drive diagnostics"
+OUTPUT_DIRECTORY       = docs/generated
+INPUT                  = README.md main tests
+USE_MDFILE_AS_MAINPAGE  = README.md
+FILE_PATTERNS          = *.c *.h *.md
+RECURSIVE              = YES
+EXCLUDE_PATTERNS       = */build/*
+EXTRACT_ALL            = YES
+EXTRACT_STATIC         = YES
+FULL_PATH_NAMES        = YES
+STRIP_FROM_PATH        = .
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+SOURCE_BROWSER         = YES
+INLINE_SOURCES         = NO
+HAVE_DOT               = NO
+QUIET                  = YES
+WARNINGS               = YES
+WARN_IF_UNDOCUMENTED   = NO
+WARN_IF_DOC_ERROR      = YES

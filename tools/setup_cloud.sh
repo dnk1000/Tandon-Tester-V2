@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# @file setup_cloud.sh
+# @brief Repeatable cloud SDK installation, build and host tests.
+#
 set -euo pipefail
 repo=/workspace/Tandon-Tester-V2
 sdk=/workspace/esp-idf

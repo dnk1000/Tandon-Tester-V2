@@ -1,3 +1,7 @@
+/**
+ * @file diagnostics.c
+ * @brief Non-writing basic, seek and endurance diagnostics with cleanup.
+ */
 #include "diagnostics.h"
 #include <stdio.h>
 #include "drive.h"
@@ -5,6 +9,10 @@
 #include "floppy_hal.h"
 #include "measurements.h"
 #include "power_monitor.h"
+/**
+ * @brief Release controls, require healthy rails, select the configured drive and home.
+ * @return ESP_OK on success, or the first prerequisite, sensor or peripheral error.
+ */
 static esp_err_t prepare(void)
 {
     drive_stop();
@@ -14,6 +22,12 @@ static esp_err_t prepare(void)
     printf("Home: %s\n",e==ESP_OK?"PASS":"FAIL");
     return e;
 }
+/**
+ * @brief Release drive controls and report the final diagnostic or cancellation result.
+ *
+ * @param e Final diagnostic result, returned unchanged.
+ * @return The supplied final diagnostic result, preserved unchanged.
+ */
 static esp_err_t finish(esp_err_t e)
 {
     bool cancelled=drive_cancelled();
@@ -21,6 +35,10 @@ static esp_err_t finish(esp_err_t e)
     printf("RESULT: %s%s\n",e==ESP_OK?"PASS":"FAIL",cancelled?" (cancelled)":"");
     return e;
 }
+/**
+ * @brief Run non-writing sensor, motor, RPM and formatted-disk activity checks.
+ * @return ESP_OK if all checks pass; controls are released on valid-request completion.
+ */
 esp_err_t diagnostics_basic(void)
 {
     puts("BASIC: formatted disk required; physical Write Enable OFF");
@@ -44,6 +62,10 @@ esp_err_t diagnostics_basic(void)
     printf("Read activity: %lu pulses %s\n",(unsigned long)activity.pulses,e==ESP_OK?"PASS":"FAIL");
     return finish(e);
 }
+/**
+ * @brief Visit representative legal tracks and verify a tracked return to zero.
+ * @return ESP_OK if all selected targets succeed; all completion paths release controls.
+ */
 esp_err_t diagnostics_seek(void)
 {
     esp_err_t e=prepare();
@@ -58,11 +80,18 @@ esp_err_t diagnostics_seek(void)
     // Do not re-home here: seek(0) must itself agree with the sensor, not mask lost steps.
     return finish(e);
 }
+/**
+ * @brief Repeat zero-to-maximum-to-zero motion with cancellation and cycle accounting.
+ *
+ * @param cycles Complete motion cycles requested, 1–100000.
+ * @return ESP_OK for all cycles or the first error; valid requests always release controls.
+ */
 esp_err_t diagnostics_exercise(unsigned cycles)
 {
     if (!cycles || cycles>100000) return ESP_ERR_INVALID_ARG;
     esp_err_t e=prepare();
     if (e!=ESP_OK) return finish(e);
+// A cycle counts as complete only after both motion legs succeed.
     unsigned completed=0;
     for (;completed<cycles;++completed) {
         e=seek(config_get()->max_track);

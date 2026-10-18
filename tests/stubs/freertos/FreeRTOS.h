@@ -1,3 +1,7 @@
+/**
+ * @file FreeRTOS.h
+ * @brief Host-only FreeRTOS fixture or declaration; not a physical hardware validation.
+ */
 #pragma once
 #include <stdint.h>
 typedef int portMUX_TYPE;

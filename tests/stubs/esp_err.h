@@ -1,3 +1,7 @@
+/**
+ * @file esp_err.h
+ * @brief Host-only esp err fixture or declaration; not a physical hardware validation.
+ */
 #pragma once
 typedef int esp_err_t;
 #define ESP_OK 0

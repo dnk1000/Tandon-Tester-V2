@@ -1,3 +1,7 @@
+/**
+ * @file power_monitor.c
+ * @brief Dual INA226 sampling, coherent rail snapshots and power interlock.
+ */
 #include "power_monitor.h"
 #include <math.h>
 #include "driver/i2c_master.h"
@@ -10,6 +14,14 @@ static power_reading_t latest={.rail5={.error=ESP_ERR_INVALID_STATE},
     .rail12={.error=ESP_ERR_INVALID_STATE}};
 static bool ready[2];
 static portMUX_TYPE lock=portMUX_INITIALIZER_UNLOCKED;
+/**
+ * @brief Read one big-endian INA226 register through a bounded I2C transaction.
+ *
+ * @param d Rail-specific I2C device handle.
+ * @param reg INA226 register address.
+ * @param v Register value, or destination written only on a successful read.
+ * @return ESP_OK on success, or the first prerequisite, sensor or peripheral error.
+ */
 static esp_err_t read_reg(i2c_master_dev_handle_t d, uint8_t reg, uint16_t *v)
 {
     uint8_t bytes[2];
@@ -17,11 +29,25 @@ static esp_err_t read_reg(i2c_master_dev_handle_t d, uint8_t reg, uint16_t *v)
     if (e==ESP_OK) *v=((uint16_t)bytes[0]<<8)|bytes[1];
     return e;
 }
+/**
+ * @brief Write one big-endian INA226 register through a bounded I2C transaction.
+ *
+ * @param d Rail-specific I2C device handle.
+ * @param reg INA226 register address.
+ * @param v Register value, or destination written only on a successful read.
+ * @return ESP_OK on success, or the first prerequisite, sensor or peripheral error.
+ */
 static esp_err_t write_reg(i2c_master_dev_handle_t d, uint8_t reg, uint16_t v)
 {
     uint8_t bytes[]={reg,v>>8,v&0xff};
     return i2c_master_transmit(d,bytes,3,50);
 }
+/**
+ * @brief Identify an INA226 before programming conversion, calibration and alerts.
+ *
+ * @param i Internal rail index: 0 is +12 V at 0x40, 1 is +5 V at 0x41.
+ * @return ESP_OK on success, or the first prerequisite, sensor or peripheral error.
+ */
 static esp_err_t setup_device(unsigned i)
 {
     uint16_t id;
@@ -42,6 +68,12 @@ static esp_err_t setup_device(unsigned i)
     if (e!=ESP_OK) return e;
     return write_reg(devices[i],6,1u<<15);
 }
+/**
+ * @brief Read rail registers, detect calibration reset and classify fault flags.
+ *
+ * @param i Internal rail index: 0 is +12 V at 0x40, 1 is +5 V at 0x41.
+ * @return Reading containing validity, communication error and classified fault flags.
+ */
 static rail_reading_t sample(unsigned i)
 {
     rail_reading_t r={0};
@@ -63,10 +95,21 @@ static rail_reading_t sample(unsigned i)
     power_rail_fault(&r,i==0?12.0f:5.0f);
     return r;
 }
+/**
+ * @brief Require valid data with no classified voltage, current, alert or overflow fault.
+ *
+ * @param r Non-NULL rail reading.
+ * @return true when the queried condition is asserted or valid.
+ */
 static bool rail_healthy(const rail_reading_t *r)
 {
     return r->valid && !r->under_voltage && !r->over_voltage && !r->over_current && !r->alert && !r->overflow;
 }
+/**
+ * @brief Retry unready devices and publish coherent rail snapshots after I2C completes.
+ *
+ * @param arg Unused task or ISR context.
+ */
 static void monitor_task(void *arg)
 {
     (void)arg;
@@ -85,11 +128,16 @@ static void monitor_task(void *arg)
         }
         power_reading_t p={.rail12=readings[0], .rail5=readings[1],
             .fault_pin=floppy_hal_power_fault(), .timestamp=floppy_hal_now_us()};
+// Finish I2C outside the spinlock, then publish both readings as one snapshot.
         portENTER_CRITICAL(&lock); latest=p; portEXIT_CRITICAL(&lock);
         floppy_hal_fault_led(!rail_healthy(&p.rail5)||!rail_healthy(&p.rail12)||p.fault_pin);
         vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
+/**
+ * @brief Create I2C device handles and start asynchronous identification and sampling.
+ * @return ESP_OK when the task starts; this alone does not establish healthy rails.
+ */
 esp_err_t power_monitor_init(void)
 {
     i2c_master_bus_config_t c={.i2c_port=-1,.sda_io_num=PIN_I2C_SDA,
@@ -104,14 +152,24 @@ esp_err_t power_monitor_init(void)
     }
     return xTaskCreate(monitor_task,"power",4096,NULL,5,NULL)==pdPASS?ESP_OK:ESP_ERR_NO_MEM;
 }
+/**
+ * @brief Copy both rails atomically relative to the monitor task.
+ *
+ * @param out Non-NULL result destination; partial acquisition data may accompany measurement errors.
+ */
 void power_monitor_snapshot(power_reading_t *out)
 {
     portENTER_CRITICAL(&lock); *out=latest; portEXIT_CRITICAL(&lock);
 }
+/**
+ * @brief Require fresh valid rails and a deasserted live hardware fault input.
+ * @return true only for healthy rails published less than 500 ms ago and no live alert.
+ */
 bool power_monitor_healthy(void)
 {
     power_reading_t p;
     power_monitor_snapshot(&p);
+// Re-read the physical pin to catch an alert newer than the published sample.
     return p.timestamp>0 && floppy_hal_now_us()-p.timestamp<500000 &&
         !floppy_hal_power_fault() && !p.fault_pin && rail_healthy(&p.rail5) && rail_healthy(&p.rail12);
 }

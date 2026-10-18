@@ -1,3 +1,7 @@
+/**
+ * @file test_power_driver.c
+ * @brief Host-only test power driver fixture or declaration; not a physical hardware validation.
+ */
 #include <assert.h>
 #include <string.h>
 #include <stdio.h>
@@ -6,34 +10,64 @@
 struct fake_device { uint16_t regs[256]; } fake[2];
 static bool io_failure,pin_fault;
 static int64_t now=1000000;
+/**
+ * @brief Verify HDS SDA/SCL pins and return the fake I2C bus.
+ */
 esp_err_t i2c_new_master_bus(const i2c_master_bus_config_t *c,i2c_master_bus_handle_t *b)
 {
     assert(c->sda_io_num==8 && c->scl_io_num==9); *b=fake;return ESP_OK;
 }
+/**
+ * @brief Map an expected INA226 address to its fake register bank.
+ */
 esp_err_t i2c_master_bus_add_device(i2c_master_bus_handle_t b,const i2c_device_config_t *c,i2c_master_dev_handle_t *d)
 {
     assert(b==fake && c->dev_addr_length==7 && c->scl_speed_hz==100000);
     assert(c->device_address==0x40 || c->device_address==0x41);
     *d=&fake[c->device_address-0x40];return ESP_OK;
 }
+/**
+ * @brief Decode big-endian register writes with optional communication failure.
+ */
 esp_err_t i2c_master_transmit(i2c_master_dev_handle_t d,const uint8_t *bytes,size_t n,int timeout)
 {
     assert(n==3 && timeout==50); if (io_failure) return ESP_ERR_TIMEOUT;
     d->regs[bytes[0]]=((uint16_t)bytes[1]<<8)|bytes[2];return ESP_OK;
 }
+/**
+ * @brief Encode a selected fixture register as a big-endian response.
+ */
 esp_err_t i2c_master_transmit_receive(i2c_master_dev_handle_t d,const uint8_t *r,size_t rn,uint8_t *out,size_t n,int timeout)
 {
     assert(rn==1 && n==2 && timeout==50);if (io_failure)return ESP_ERR_TIMEOUT;
     uint16_t val=d->regs[*r];out[0]=val>>8;out[1]=val&255;return ESP_OK;
 }
+/**
+ * @brief Accept task creation without executing the infinite monitor loop.
+ */
 int xTaskCreate(void (*task)(void *),const char *name,unsigned stack,void *arg,unsigned priority,void *handle)
 {
     (void)task;(void)name;(void)stack;(void)arg;(void)priority;(void)handle;return pdPASS;
 }
+/**
+ * @brief Advance deterministic fixture time without running a scheduler.
+ */
 void vTaskDelay(unsigned ticks) { now+=ticks*1000; }
+/**
+ * @brief Supply or record fixture hardware state for the production code under test.
+ */
 bool floppy_hal_power_fault(void) { return pin_fault; }
+/**
+ * @brief Supply or record fixture hardware state for the production code under test.
+ */
 int64_t floppy_hal_now_us(void) { return now; }
+/**
+ * @brief Supply or record fixture hardware state for the production code under test.
+ */
 void floppy_hal_fault_led(bool on) { (void)on; }
+/**
+ * @brief Run the power driver host fixture assertions.
+ */
 int main(void)
 {
     assert(power_monitor_init()==ESP_OK);

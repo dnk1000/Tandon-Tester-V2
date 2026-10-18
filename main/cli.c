@@ -1,3 +1,7 @@
+/**
+ * @file cli.c
+ * @brief Native USB command input, execution and cancellation.
+ */
 #include "cli.h"
 #include <stdio.h>
 #include <string.h>
@@ -19,6 +23,11 @@
 #include "freertos/task.h"
 static QueueHandle_t commands;
 static atomic_bool busy;
+/**
+ * @brief Print the complete command reference or one validated help topic.
+ *
+ * @param topic Validated command name, or an empty string to print every help entry.
+ */
 static void help(const char *topic)
 {
     const struct { const char *name, *usage; } entries[]={
@@ -39,6 +48,9 @@ static void help(const char *topic)
         if (!*topic || strcmp(topic,entries[i].name)==0) puts(entries[i].usage);
     puts("No write commands. Ctrl-C / stop deasserts controls and invalidates position.");
 }
+/**
+ * @brief Print a coherent rail snapshot, its age and the live power interlock state.
+ */
 static void power_print(void)
 {
     power_reading_t p;
@@ -57,6 +69,9 @@ static void power_print(void)
         power_monitor_healthy()?"YES":"NO",floppy_hal_power_fault(),
         p.timestamp?(floppy_hal_now_us()-p.timestamp)/1000:-1);
 }
+/**
+ * @brief Print the current index state and timing only when fresh.
+ */
 static void index_print(void)
 {
     index_reading_t i;
@@ -67,6 +82,9 @@ static void index_print(void)
         i.period_us/1000.0,i.width_us/1000.0,1000000.0/i.period_us,60000000.0/i.period_us,
         i.min_us/1000.0,i.max_us/1000.0,(i.max_us-i.min_us)/1000.0);
 }
+/**
+ * @brief Print active RAM configuration with engineering units.
+ */
 static void config_print(void)
 {
     const tester_config_t *c=config_get();
@@ -76,6 +94,12 @@ static void config_print(void)
         c->step_time,c->max_track,c->home_limit,c->rpm_samples,(double)c->rpm_tolerance,
         c->drive_select,c->motor_spinup_ms,c->read_sample_ms);
 }
+/**
+ * @brief Dispatch a validated command through the drive and measurement layers.
+ *
+ * @param c Validated parsed command; only the worker dispatches effects.
+ * @return ESP_OK on success, or the first prerequisite, sensor or peripheral error.
+ */
 static esp_err_t execute(const command_t *c)
 {
     switch (c->kind) {
@@ -158,6 +182,11 @@ static esp_err_t execute(const command_t *c)
     }
     return ESP_OK;
 }
+/**
+ * @brief Own hardware command execution and enforce safety during idle polls.
+ *
+ * @param arg Unused task or ISR context.
+ */
 static void worker(void *arg)
 {
     (void)arg;
@@ -182,6 +211,11 @@ static void worker(void *arg)
         printf("tm100> "); fflush(stdout);
     }
 }
+/**
+ * @brief Service USB input independently so long operations remain cancellable.
+ *
+ * @param arg Unused task or ISR context.
+ */
 static void input_task(void *arg)
 {
     (void)arg;
@@ -197,6 +231,7 @@ static void input_task(void *arg)
         unsigned char ch;
         int count=usb_serial_jtag_read_bytes(&ch,1,pdMS_TO_TICKS(10));
         if (count!=1) continue;
+// ASCII ETX bypasses the command queue while a long test is executing.
         if (ch==3) {
             drive_cancel(); used=0; discard=false;
             puts("\nCancelled; controls releasing."); last_cr=false; continue;
@@ -227,6 +262,10 @@ static void input_task(void *arg)
         } else { discard=true; drive_cancel(); }
     }
 }
+/**
+ * @brief Install native USB console I/O and start the input and command-worker tasks.
+ * @return ESP_OK when tasks start, or a driver/allocation error; call once after HAL setup.
+ */
 esp_err_t cli_start(void)
 {
     usb_serial_jtag_driver_config_t c={.tx_buffer_size=2048,.rx_buffer_size=1024};

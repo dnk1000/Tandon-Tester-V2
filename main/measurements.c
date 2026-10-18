@@ -1,3 +1,7 @@
+/**
+ * @file measurements.c
+ * @brief Index, PCNT activity and RMT DMA timing measurements.
+ */
 #include "measurements.h"
 #include <stdatomic.h>
 #include <math.h>
@@ -26,6 +30,11 @@ static atomic_bool capture_done;
 static bool initialized;
 static activity_reading_t last_activity;
 static int64_t last_activity_time;
+/**
+ * @brief Timestamp index edges and enqueue rising edges for fresh RPM acquisitions.
+ *
+ * @param arg Unused task or ISR context.
+ */
 static void index_isr(void *arg)
 {
     (void)arg;
@@ -47,6 +56,14 @@ static void index_isr(void *arg)
     if (active && xQueueSendFromISR(index_queue,&now,&wake)!=pdTRUE) atomic_store(&index_overflow,true);
     if (wake) portYIELD_FROM_ISR();
 }
+/**
+ * @brief Reduce callback-owned RMT DMA segments in ISR context and publish completion.
+ *
+ * @param chan Unused RMT channel handle supplied by the driver.
+ * @param e Callback-owned DMA segment view; consume before returning, never retain.
+ * @param ctx Unused receiver callback context.
+ * @return false because the worker polls completion instead of using task notifications.
+ */
 static bool rx_done(rmt_channel_handle_t chan, const rmt_rx_done_event_data_t *e, void *ctx)
 {
     (void)chan; (void)ctx;
@@ -56,10 +73,15 @@ static bool rx_done(rmt_channel_handle_t chan, const rmt_rx_done_event_data_t *e
         timing_accumulator_feed(&capture,s.level0,s.duration0,capture_goal);
         timing_accumulator_feed(&capture,s.level1,s.duration1,capture_goal);
     }
+// Release/acquire publishes accumulated fields before the worker sees completion.
     if (capture.result.samples>=capture_goal || e->flags.is_last)
         atomic_store_explicit(&capture_done,true,memory_order_release);
     return false;
 }
+/**
+ * @brief Allocate index, PCNT and RMT resources once; enable APIs only on full success.
+ * @return ESP_OK on success, or the first prerequisite, sensor or peripheral error.
+ */
 esp_err_t measurements_init(void)
 {
     index_queue=xQueueCreate(128,sizeof(int64_t));
@@ -101,18 +123,31 @@ esp_err_t measurements_init(void)
     initialized=true;
     return ESP_OK;
 }
+/**
+ * @brief Copy index statistics under lock and recompute one-second freshness.
+ *
+ * @param out Non-NULL result destination; partial acquisition data may accompany measurement errors.
+ */
 void measurements_index(index_reading_t *out)
 {
     portENTER_CRITICAL(&index_lock); *out=index_state; portEXIT_CRITICAL(&index_lock);
     out->active=floppy_hal_index();
     out->valid=out->period_us>0 && esp_timer_get_time()-out->last_rise<1000000;
 }
+/**
+ * @brief Measure new complete index intervals with bounded cancellable waits.
+ *
+ * @param n Complete intervals requested; index allows 1–100, read timing allows 1–10000.
+ * @param out Non-NULL result destination; partial acquisition data may accompany measurement errors.
+ * @return ESP_OK for complete acquisition; inspect passed separately for speed tolerance.
+ */
 esp_err_t measurements_rpm(unsigned n, rpm_reading_t *out)
 {
     memset(out,0,sizeof(*out));
     if (!initialized) return ESP_ERR_INVALID_STATE;
     if (n<1 || n>100) return ESP_ERR_INVALID_ARG;
     if (!drive_state()->motor || drive_state()->selected<0) return ESP_ERR_INVALID_STATE;
+// Ignore history: N complete intervals require N+1 new rising edges.
     xQueueReset(index_queue); atomic_store(&index_overflow,false);
     int64_t previous=0, total=0, min=INT64_MAX, max=0;
     for (unsigned i=0;i<=n;++i) {
@@ -142,12 +177,26 @@ esp_err_t measurements_rpm(unsigned n, rpm_reading_t *out)
         fabs(out->rpm_min-300.0)*100/300<=tolerance && fabs(out->rpm_max-300.0)*100/300<=tolerance;
     return ESP_OK;
 }
+/**
+ * @brief Read the last successful activity result rather than a continuous live count.
+ *
+ * @param out Non-NULL result destination; partial acquisition data may accompany measurement errors.
+ * @param age_us Non-NULL age destination in microseconds, or -1 before the first observation.
+ * @return true when a previous successful observation exists.
+ */
 bool measurements_last_activity(activity_reading_t *out, int64_t *age_us)
 {
     *out=last_activity;
     *age_us=last_activity_time?esp_timer_get_time()-last_activity_time:-1;
     return last_activity_time!=0;
 }
+/**
+ * @brief Count read assertion edges with PCNT over a bounded observation window.
+ *
+ * @param ms Requested milliseconds; scheduler delays may extend elapsed time.
+ * @param out Non-NULL result destination; partial acquisition data may accompany measurement errors.
+ * @return ESP_OK for a complete window, including zero pulses; caller classifies absence.
+ */
 esp_err_t measurements_activity(unsigned ms, activity_reading_t *out)
 {
     memset(out,0,sizeof(*out));
@@ -160,6 +209,7 @@ esp_err_t measurements_activity(unsigned ms, activity_reading_t *out)
     e=pcnt_unit_start(counter);
     if (e!=ESP_OK) return e;
     e=drive_wait_ms(ms);
+// Stop counting even when the cancellable observation wait failed.
     esp_err_t stop=pcnt_unit_stop(counter);
     out->duration_us=esp_timer_get_time()-start;
     if (e!=ESP_OK) return e;
@@ -173,6 +223,13 @@ esp_err_t measurements_activity(unsigned ms, activity_reading_t *out)
     last_activity=*out; last_activity_time=esp_timer_get_time();
     return ESP_OK;
 }
+/**
+ * @brief Capture a contiguous RMT frame and summarize complete rising-edge intervals.
+ *
+ * @param n Complete intervals requested; index allows 1–100, read timing allows 1–10000.
+ * @param out Non-NULL result destination; partial acquisition data may accompany measurement errors.
+ * @return ESP_OK for the requested count; partial data is returned on timeout.
+ */
 esp_err_t measurements_timing(unsigned n, timing_reading_t *out)
 {
     memset(out,0,sizeof(*out));

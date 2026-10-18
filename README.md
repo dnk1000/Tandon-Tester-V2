@@ -273,3 +273,17 @@ Track 0 and Write Protect are sampled into the drive state on idle safety polls
 and during cancellable waits; status commands also read their current levels.
 Only the command worker changes drive state; the input task requests cancellation
 atomically. Power monitor task controls only its independent fault LED.
+
+## Source documentation
+
+Firmware and host-test C files use Doxygen `@file`/`@brief` headers, with API
+parameter, result, ownership, timing and safety documentation alongside the code.
+Build and shell files use equivalent native comment headers. Generate the HTML
+reference with an installed Doxygen executable:
+
+```sh
+doxygen Doxyfile
+```
+
+Open `docs/generated/html/index.html` locally. Generated documentation is ignored
+by Git; it is not required to build the firmware or run the host tests.

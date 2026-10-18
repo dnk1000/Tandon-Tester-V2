@@ -1,3 +1,7 @@
+/**
+ * @file test_main.c
+ * @brief Host-only test main fixture or declaration; not a physical hardware validation.
+ */
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
@@ -15,21 +19,54 @@ static bool motor, inward, healthy, stuck_high, stuck_low;
 static bool rpm_pass, read_present;
 static int64_t clock_us, previous_pulse, cancel_at, fault_at;
 static unsigned checks;
+/**
+ * @brief Expose the fixture configuration to production drive and diagnostic code.
+ */
 const tester_config_t *config_get(void) { return &cfg; }
+/**
+ * @brief Require fresh valid rails and a deasserted live hardware fault input.
+ */
 bool power_monitor_healthy(void) { return healthy; }
+/**
+ * @brief Supply or record fixture hardware state for the production code under test.
+ */
 int64_t floppy_hal_now_us(void) { return clock_us; }
+/**
+ * @brief Supply or record fixture hardware state for the production code under test.
+ */
 void floppy_hal_safe(void) { selected=-1; motor=false; inward=false; }
+/**
+ * @brief Supply or record fixture hardware state for the production code under test.
+ */
 void floppy_hal_select(int ds) { selected=ds; }
+/**
+ * @brief Supply or record fixture hardware state for the production code under test.
+ */
 void floppy_hal_motor(bool on) { motor=on; }
+/**
+ * @brief Supply or record fixture hardware state for the production code under test.
+ */
 void floppy_hal_direction(bool in) { inward=in; }
+/**
+ * @brief Supply or record fixture hardware state for the production code under test.
+ */
 bool floppy_hal_track0(void) { return stuck_high || (!stuck_low && physical==0); }
+/**
+ * @brief Supply or record fixture hardware state for the production code under test.
+ */
 bool floppy_hal_wp(void) { return true; }
+/**
+ * @brief Supply or record fixture hardware state for the production code under test.
+ */
 void floppy_hal_delay_us(uint32_t us)
 {
     clock_us+=us;
     if (cancel_at && clock_us>=cancel_at) drive_cancel();
     if (fault_at && clock_us>=fault_at) healthy=false;
 }
+/**
+ * @brief Supply or record fixture hardware state for the production code under test.
+ */
 void floppy_hal_step_pulse(void)
 {
     assert(selected>=0 && selected<4);
@@ -40,16 +77,25 @@ void floppy_hal_step_pulse(void)
     else if (physical>0) --physical;
     clock_us+=25;
 }
+/**
+ * @brief Supply or record fixture hardware state for the production code under test.
+ */
 esp_err_t measurements_rpm(unsigned n, rpm_reading_t *out)
 {
     assert(n==cfg.rpm_samples); assert(motor && selected>=0);
     *out=(rpm_reading_t){.rpm=300,.passed=rpm_pass}; return ESP_OK;
 }
+/**
+ * @brief Supply or record fixture hardware state for the production code under test.
+ */
 esp_err_t measurements_activity(unsigned ms, activity_reading_t *out)
 {
     assert(ms==cfg.read_sample_ms); assert(motor && selected>=0);
     *out=(activity_reading_t){.pulses=read_present?123:0}; return ESP_OK;
 }
+/**
+ * @brief Reset the mechanism fixture and start production drive code at a chosen physical track.
+ */
 static void fresh(int position)
 {
     config_defaults(&cfg); healthy=true; stuck_high=stuck_low=false;
@@ -57,10 +103,16 @@ static void fresh(int position)
     physical=position; pulses=0; previous_pulse=0; clock_us+=1000000;
     cancel_at=fault_at=0; drive_clear_cancel(); drive_init();
 }
+/**
+ * @brief Assert that a completed stop leaves motor/select released and position unknown.
+ */
 static void safe(void)
 {
     assert(selected==-1 && !motor && !drive_state()->position_valid && drive_state()->track==-1);
 }
+/**
+ * @brief Test defaults, cross-field bounds and non-finite configuration rejection.
+ */
 static void test_defaults(void)
 {
     fresh(5); assert(config_validate(&cfg)); assert(cfg.rpm_tolerance==1.5f);
@@ -74,6 +126,9 @@ static void test_defaults(void)
     bad=cfg; bad.read_sample_ms=0; assert(!config_validate(&bad));
     checks++;
 }
+/**
+ * @brief Test motion limits, homing, sensor failures, cancellation ordering and power faults.
+ */
 static void test_drive(void)
 {
     fresh(15); safe(); assert(seek(0)!=ESP_OK); assert(step_in()!=ESP_OK); assert(!pulses); checks++;
@@ -100,6 +155,9 @@ static void test_drive(void)
     drive_cancel(); drive_clear_cancel(); drive_poll(); safe(); checks++;
     fresh(0); assert(home()==ESP_OK); assert(drive_select(4)==ESP_ERR_INVALID_ARG && selected==0); checks++;
 }
+/**
+ * @brief Test accepted command forms and malformed, overflowing or destructive input rejection.
+ */
 static void test_parser(void)
 {
     fresh(0); command_t c;
@@ -127,6 +185,9 @@ static void test_parser(void)
     char longline[200]; memset(longline,'a',199);longline[199]=0;assert(!command_parse(longline,&cfg,&c));
     safe(); assert(pulses==0); checks++;
 }
+/**
+ * @brief Test interval statistics, initial fragments and DMA block continuity.
+ */
 static void test_timing(void)
 {
     timing_accumulator_t a; timing_accumulator_init(&a);
@@ -145,6 +206,9 @@ static void test_timing(void)
     timing_accumulator_feed(&a,0,20,2); timing_accumulator_feed(&a,1,20,2);
     assert(a.result.samples==1 && a.result.min_ticks==40); checks++;
 }
+/**
+ * @brief Test signed INA226 scaling and rail fault classification.
+ */
 static void test_power(void)
 {
     assert(fabsf(ina226_bus_voltage(4000)-5)<0.00001f);
@@ -158,6 +222,9 @@ static void test_power(void)
     r.current=-.1; assert(power_rail_fault(&r,5));
     r=(rail_reading_t){0}; assert(power_rail_fault(&r,5)); checks++;
 }
+/**
+ * @brief Run production diagnostics against controlled mechanism and measurement doubles.
+ */
 static void test_diagnostics(void)
 {
     fresh(10); assert(diagnostics_basic()==ESP_OK);safe();checks++;
@@ -168,6 +235,9 @@ static void test_diagnostics(void)
     fresh(10); cancel_at=clock_us+200000; assert(diagnostics_exercise(100)!=ESP_OK);safe();checks++;
     fresh(10); stuck_high=true; assert(diagnostics_seek()!=ESP_OK);safe();checks++;
 }
+/**
+ * @brief Run the main host fixture assertions.
+ */
 int main(void)
 {
     test_defaults();test_drive();test_parser();test_timing();test_power();test_diagnostics();
